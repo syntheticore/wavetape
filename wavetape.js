@@ -5,30 +5,33 @@ var Wavetape = function() {
 
   if(!Wavetape.hasAudio) return;
 
-  var measureRate = 150;
-  var pulseLength = 2;
-  var frequency = 12000
-  var bufferLength = 1024 * 8;
-  var waitTime = 990;
+  self.measureRate = 150;
+  self.pulseLength = 2;
+  self.frequency = 12000;
+  self.bufferLength = 1024 * 8;
+  self.waitTime = 84;
   
-  var filterKernel = 32;
-  var downsampleFactor = 8;
-  var numMeasurements = 5;
+  self.filterKernel = 32;
+  self.downsampleFactor = 8;
+  self.numMeasurements = 5;
+
+  self.temperature = 20; // °C
+  var speedOfSound = 331.3 + (0.6 * self.temperature); // m/s
   
   var ctx = new AudioContext();
-  var freqData = new Uint8Array(bufferLength);
-  var waveform = new Uint8Array(bufferLength);
+  var freqData = new Uint8Array(self.bufferLength);
+  var waveform = new Uint8Array(self.bufferLength);
   var stream, source, analyser, filter, processor;
 
   // Send a single pulse from the speaker
   var beep = function() {
     var oc = ctx.createOscillator();
     oc.type = 'sine';
-    oc.frequency.value = frequency;
+    oc.frequency.value = self.frequency;
     oc.connect(ctx.destination);
     var t = ctx.currentTime;
     oc.start(t);
-    oc.stop(t + pulseLength / 1000);
+    oc.stop(t + self.pulseLength / 1000);
   };
 
   // Listen on the microphone
@@ -42,10 +45,10 @@ var Wavetape = function() {
       processor = ctx.createScriptProcessor(2048, 1, 1);
       // Focus on the frequency band of our pulses
       filter.type = 'bandpass';
-      filter.frequency.value = frequency;
+      filter.frequency.value = self.frequency;
       filter.Q.value = 50;
       // Create analyser for extracting data from stream
-      analyser.fftSize = bufferLength * 2;
+      analyser.fftSize = self.bufferLength * 2;
       analyser.smoothingTimeConstant = 0;
       // Connect nodes
       source.connect(filter);
@@ -99,7 +102,7 @@ var Wavetape = function() {
       if(lastValue < value && nextValue < value) {
         peaks.push({
           value: value,
-          time: (i / ctx.sampleRate) * downsampleFactor
+          time: (i / ctx.sampleRate) * self.downsampleFactor
         });
       }
     }
@@ -135,19 +138,19 @@ var Wavetape = function() {
       analyser.getByteTimeDomainData(waveform);
       // Create a smooth hull around the waveform
       var volume = convert2volume(waveform);
-      var smooth = smoothen(volume, filterKernel);
-      var miniVolume = downsample(smooth, downsampleFactor);
-      var miniKernel = filterKernel / downsampleFactor;
+      var smooth = smoothen(volume, self.filterKernel);
+      var miniVolume = downsample(smooth, self.downsampleFactor);
+      var miniKernel = self.filterKernel / self.downsampleFactor;
       miniVolume = smoothen(smoothen(miniVolume, miniKernel), miniKernel);
       // Detect echoes
       var signals = detectEcho(miniVolume);
       if(!signals) return;
       // Calculate distance
-      var distance = (signals.echo.time - signals.pulse.time) * 340;
+      var distance = (signals.echo.time - signals.pulse.time) * speedOfSound / 2;
       // Return used buffer for visualization
       signals.signal = miniVolume;
       cb(distance, signals);
-    }, waitTime);
+    }, self.waitTime);
   };
 
   var interval;
@@ -164,13 +167,15 @@ var Wavetape = function() {
         measure(function(dist, signals) {
           // Collect readings
           measurements.push(dist);
-          if(measurements.length == numMeasurements) {
+          if(measurements.length == self.numMeasurements) {
+            // Return measurements
             onMeasure(_.average(measurements));
             measurements.shift();
           }
+          // Return debugging data
           onData && onData(signals);
         });
-      }, measureRate);
+      }, self.measureRate);
       // Grab audio buffer periodically for debugging purposes
       if(onData) {
         self.onData = onData;
