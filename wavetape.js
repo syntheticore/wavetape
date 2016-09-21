@@ -5,18 +5,17 @@ var Wavetape = function() {
 
   if(!Wavetape.hasAudio) return;
 
-  self.measureRate = 150;
+  self.measureRate = 190;
   self.pulseLength = 2;
   self.frequency = 12000;
   self.bufferLength = 1024 * 8;
-  self.waitTime = 84;
+  self.waitTime = 22;
   
   self.filterKernel = 32;
   self.downsampleFactor = 8;
   self.numMeasurements = 5;
 
   self.temperature = 20; // °C
-  var speedOfSound = 331.3 + (0.6 * self.temperature); // m/s
   
   var ctx = new AudioContext();
   var freqData = new Uint8Array(self.bufferLength);
@@ -24,7 +23,7 @@ var Wavetape = function() {
   var stream, source, analyser, filter, processor;
 
   // Send a single pulse from the speaker
-  var beep = function() {
+  var pulse = function() {
     var oc = ctx.createOscillator();
     oc.type = 'sine';
     oc.frequency.value = self.frequency;
@@ -102,6 +101,7 @@ var Wavetape = function() {
       if(lastValue < value && nextValue < value) {
         peaks.push({
           value: value,
+          index: i,
           time: (i / ctx.sampleRate) * self.downsampleFactor
         });
       }
@@ -126,11 +126,16 @@ var Wavetape = function() {
     };
   };
 
+  // Return the speed of sound in m/s
+  var speedOfSound = function() {
+    return 331.3 + (0.6 * self.temperature);
+  };
+
   // Perform a single measurement
   // The audio stream must be running already when calling this function
   var measure = function(cb) {
     // Send pulse
-    beep();
+    pulse();
     // Wait for echoes to be recorded
     _.defer(function() {
       if(!running) return;
@@ -146,7 +151,7 @@ var Wavetape = function() {
       var signals = detectEcho(miniVolume);
       if(!signals) return;
       // Calculate distance
-      var distance = (signals.echo.time - signals.pulse.time) * speedOfSound / 2;
+      var distance = (signals.echo.time - signals.pulse.time) * speedOfSound() / 2;
       // Return used buffer for visualization
       signals.signal = miniVolume;
       cb(distance, signals);
@@ -156,6 +161,7 @@ var Wavetape = function() {
   var interval;
   var running = false;
 
+  // Start measuring until stopped
   self.start = function(onMeasure, onData) {
     if(running) return;
     running = true;
@@ -194,6 +200,7 @@ var Wavetape = function() {
     });
   };
 
+  // Stop sending and listening
   self.stop = function() {
     running = false;
     self.onData = null;
