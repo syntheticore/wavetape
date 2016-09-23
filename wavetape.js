@@ -5,12 +5,11 @@ var Wavetape = function() {
 
   if(!Wavetape.hasAudio) return;
 
-  self.measureRate = 190;
+  self.measureRate = 160;
   self.pulseLength = 2;
   self.frequency = 12000;
-  self.bufferLength = 1024 * 8;
-  self.waitTime = 22;
-  
+  self.bufferLength = 512;
+
   self.filterKernel = 32;
   self.downsampleFactor = 8;
   self.numMeasurements = 5;
@@ -18,9 +17,7 @@ var Wavetape = function() {
   self.temperature = 20; // °C
   
   var ctx = new AudioContext();
-  var freqData = new Uint8Array(self.bufferLength);
-  var waveform = new Uint8Array(self.bufferLength);
-  var stream, source, analyser, filter, processor;
+  var stream, source, filter, processor;
 
   // Send a single pulse from the speaker
   var pulse = function() {
@@ -34,34 +31,57 @@ var Wavetape = function() {
   };
 
   // Listen on the microphone
-  var listen = function(onReady) {
+  var listen = function(cb) {
     // Open audio stream
     navigator.mediaDevices.getUserMedia({audio: true}).then(function(_stream) {
       stream = _stream;
       source = ctx.createMediaStreamSource(stream);
-      analyser = ctx.createAnalyser();
       filter = ctx.createBiquadFilter();
-      processor = ctx.createScriptProcessor(2048, 1, 1);
+      processor = ctx.createScriptProcessor(self.bufferLength, 1, 1);
       // Focus on the frequency band of our pulses
       filter.type = 'bandpass';
       filter.frequency.value = self.frequency;
       filter.Q.value = 50;
-      // Create analyser for extracting data from stream
-      analyser.fftSize = self.bufferLength * 2;
-      analyser.smoothingTimeConstant = 0;
       // Connect nodes
       source.connect(filter);
-      filter.connect(analyser);
-      analyser.connect(processor);
+      filter.connect(processor);
       processor.connect(ctx.destination);
-      onReady();
+      // Record the signal
+      var record = [];
+      var recording = false;
+      var recordLength = ctx.sampleRate * (self.measureRate / 1000) * 0.5;
+      console.log(recordLength);
+      processor.onaudioprocess = function(e) {
+        var buffer = e.inputBuffer.getChannelData(0);
+        if(record.length < recordLength) {
+          var volume = convert2volume(buffer);
+          if(recording) {
+            record.push.apply(record, volume);
+          } else {
+            // Find start of pulse
+            if(_.any(volume, function(sample) {
+              return sample > 0.02;
+            })) {
+              recording = true;
+              // Prepad with zeroes,
+              // in case we are starting right in the pulse itself
+              record.push.apply(record, new Array(128).fill(0));
+              record.push.apply(record, volume);
+            }
+          }
+        } else {
+          cb(record);
+          record = [];
+          recording = false;
+        }
+      };
     });
   };
 
   // Return a buffer representing volume
   var convert2volume = function(waveform) {
-    return _.map(waveform, function(sample) {
-      return sample >= 128 ? (sample / 256.0 - 0.5) * 2 : 0;
+    return _.map(waveform, function(sample, i) {
+      return (sample > 0 ? sample : -sample);
     });
   };
 
@@ -131,19 +151,18 @@ var Wavetape = function() {
     return 331.3 + (0.6 * self.temperature);
   };
 
-  // Perform a single measurement
-  // The audio stream must be running already when calling this function
+  var getDistance = function(pulse, echo) {
+    return (echo.time - pulse.time) * speedOfSound() / 2;
+  };
+
+  // Return measurements continuously
   var measure = function(cb) {
-    // Send pulse
-    pulse();
-    // Wait for echoes to be recorded
-    _.defer(function() {
-      if(!running) return;
-      // Get audio buffer
-      analyser.getByteTimeDomainData(waveform);
-      // Create a smooth hull around the waveform
-      var volume = convert2volume(waveform);
-      var smooth = smoothen(volume, self.filterKernel);
+    // Start sending pulses
+    interval = setInterval(pulse, self.measureRate);
+    // Start listening
+    listen(function(buffer) {
+      // Smoothen the buffer
+      var smooth = smoothen(buffer, self.filterKernel);
       var miniVolume = downsample(smooth, self.downsampleFactor);
       var miniKernel = self.filterKernel / self.downsampleFactor;
       miniVolume = smoothen(smoothen(miniVolume, miniKernel), miniKernel);
@@ -151,11 +170,11 @@ var Wavetape = function() {
       var signals = detectEcho(miniVolume);
       if(!signals) return;
       // Calculate distance
-      var distance = (signals.echo.time - signals.pulse.time) * speedOfSound() / 2;
+      var distance = getDistance(signals.pulse, signals.echo);
       // Return used buffer for visualization
       signals.signal = miniVolume;
       cb(distance, signals);
-    }, self.waitTime);
+    });
   };
 
   var interval;
@@ -165,45 +184,23 @@ var Wavetape = function() {
   self.start = function(onMeasure, onData) {
     if(running) return;
     running = true;
+    // Collect readings
     var measurements = [];
-    // Start listening
-    listen(function() {
-      // Start sending pulses
-      interval = setInterval(function() {
-        measure(function(dist, signals) {
-          // Collect readings
-          measurements.push(dist);
-          if(measurements.length == self.numMeasurements) {
-            // Return measurements
-            onMeasure(_.average(measurements));
-            measurements.shift();
-          }
-          // Return debugging data
-          onData && onData(signals);
-        });
-      }, self.measureRate);
-      // Grab audio buffer periodically for debugging purposes
-      if(onData) {
-        self.onData = onData;
-        var loop = function() {
-          if(!self.onData) return;
-          requestAnimationFrame(loop);
-          analyser.getByteFrequencyData(freqData);
-          analyser.getByteTimeDomainData(waveform);
-          self.onData({
-            frequency: freqData,
-            waveform: waveform
-          });
-        };
-        loop();
+    measure(function(dist, signals) {
+      measurements.push(dist);
+      if(measurements.length == self.numMeasurements) {
+        // Return average measurement
+        onMeasure(_.average(measurements));
+        measurements.shift();
       }
+      // Return debugging data
+      onData && onData(signals);
     });
   };
 
   // Stop sending and listening
   self.stop = function() {
     running = false;
-    self.onData = null;
     clearInterval(interval);
     if(stream) {
       stream.getTracks().forEach(function(track) {
@@ -211,7 +208,6 @@ var Wavetape = function() {
       });
       source.disconnect();
       filter.disconnect();
-      analyser.disconnect();
       processor.disconnect();
       stream = null;
     }
