@@ -13,7 +13,7 @@ var Wavetape = function() {
   self.filterKernel = 32;
   self.downsampleFactor = 8;
   self.minAmplitude = 0.02;
-  self.numMeasurements = 5;
+  self.numMeasurements = 12;
 
   self.temperature = 20; // °C
   
@@ -51,13 +51,12 @@ var Wavetape = function() {
       var record = [];
       var recording = false;
       var recordLength = getRecordLength();
-      console.log(recordLength);
       processor.onaudioprocess = function(e) {
         var buffer = e.inputBuffer.getChannelData(0);
         if(record.length < recordLength) {
           var volume = convert2volume(buffer);
           if(recording) {
-            record.push.apply(record, volume);
+            record = record.concat(volume);
           } else {
             // Find start of pulse
             if(_.any(volume, function(sample) {
@@ -66,8 +65,8 @@ var Wavetape = function() {
               recording = true;
               // Prepad with zeroes,
               // in case we are starting right in the pulse itself
-              record.push.apply(record, new Array(self.filterKernel).fill(0));
-              record.push.apply(record, volume);
+              record = record.concat(new Array(self.filterKernel).fill(0));
+              record = record.concat(volume);
             }
           }
         } else {
@@ -191,15 +190,15 @@ var Wavetape = function() {
   self.start = function(onMeasure, onData) {
     if(running) return;
     running = true;
-    // Collect readings
     var measurements = [];
     measure(function(dist, signals) {
+      // Collect readings
       measurements.push(dist);
-      if(measurements.length == self.numMeasurements) {
-        // Return average measurement
-        onMeasure(_.average(measurements));
+      if(measurements.length > self.numMeasurements) {
         measurements.shift();
       }
+      // Return average measurement
+      if(measurements.length) onMeasure(_.average(measurements));
       // Return debugging data
       onData && onData(signals);
     });
