@@ -8,10 +8,11 @@ var Wavetape = function() {
   self.measureTime = 120;
   self.pulseLength = 2;
   self.frequency = 10859;
-  
+
   self.bufferLength = 512;
   self.filterKernel = 32;
   self.downsampleFactor = 8;
+  self.minAmplitude = 0.02;
   self.numMeasurements = 5;
 
   self.temperature = 20; // °C
@@ -49,7 +50,7 @@ var Wavetape = function() {
       // Record the signal
       var record = [];
       var recording = false;
-      var recordLength = ctx.sampleRate * (self.measureTime / 1000) * 0.5;
+      var recordLength = getRecordLength();
       console.log(recordLength);
       processor.onaudioprocess = function(e) {
         var buffer = e.inputBuffer.getChannelData(0);
@@ -60,12 +61,12 @@ var Wavetape = function() {
           } else {
             // Find start of pulse
             if(_.any(volume, function(sample) {
-              return sample > 0.02;
+              return sample > self.minAmplitude;
             })) {
               recording = true;
               // Prepad with zeroes,
               // in case we are starting right in the pulse itself
-              record.push.apply(record, new Array(128).fill(0));
+              record.push.apply(record, new Array(self.filterKernel).fill(0));
               record.push.apply(record, volume);
             }
           }
@@ -78,7 +79,11 @@ var Wavetape = function() {
     });
   };
 
-  // Return a buffer representing volume
+  var getRecordLength = function() {
+    return ctx.sampleRate * (self.measureTime / 1000) - self.bufferLength * 4;
+  };
+
+  // Make a buffer representing volume from the raw <waveform>
   var convert2volume = function(waveform) {
     return _.map(waveform, function(sample, i) {
       return (sample > 0 ? sample : -sample);
@@ -110,7 +115,7 @@ var Wavetape = function() {
     return out;
   };
 
-  // Return the times and values of all echoes found in buffer
+  // Return the times and amplitudes of all echoes found in <buffer>
   var detectEcho = function(buffer) {
     // Detect peaks
     var peaks = [];
@@ -151,6 +156,8 @@ var Wavetape = function() {
     return 331.3 + (0.6 * self.temperature);
   };
 
+  // Return the distance to the next obstacle in meters,
+  // based on the relative times of a pulse and its echo
   var getDistance = function(pulse, echo) {
     return (echo.time - pulse.time) * speedOfSound() / 2;
   };
@@ -213,9 +220,11 @@ var Wavetape = function() {
     }
   };
 
+  // Return the maximum distance that can be measured in meters,
+  // based on the current measuring rate and temperature
   self.getMaxRange = function() {
-    var measureRate = 1000 / self.measureTime;
-    return speedOfSound() / measureRate / 2;
+    var duration = getRecordLength() / ctx.sampleRate;
+    return speedOfSound() * duration / 2;
   };
 };
 
