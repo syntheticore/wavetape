@@ -5,11 +5,11 @@ var Wavetape = function() {
 
   if(!Wavetape.hasAudio) return;
 
-  self.measureRate = 160;
+  self.measureTime = 120;
   self.pulseLength = 2;
-  self.frequency = 12000;
+  self.frequency = 10859;
+  
   self.bufferLength = 512;
-
   self.filterKernel = 32;
   self.downsampleFactor = 8;
   self.numMeasurements = 5;
@@ -49,7 +49,7 @@ var Wavetape = function() {
       // Record the signal
       var record = [];
       var recording = false;
-      var recordLength = ctx.sampleRate * (self.measureRate / 1000) * 0.5;
+      var recordLength = ctx.sampleRate * (self.measureTime / 1000) * 0.5;
       console.log(recordLength);
       processor.onaudioprocess = function(e) {
         var buffer = e.inputBuffer.getChannelData(0);
@@ -158,13 +158,13 @@ var Wavetape = function() {
   // Return measurements continuously
   var measure = function(cb) {
     // Start sending pulses
-    interval = setInterval(pulse, self.measureRate);
+    interval = setInterval(pulse, self.measureTime);
     // Start listening
     listen(function(buffer) {
       // Smoothen the buffer
       var smooth = smoothen(buffer, self.filterKernel);
       var miniVolume = downsample(smooth, self.downsampleFactor);
-      var miniKernel = self.filterKernel / self.downsampleFactor;
+      var miniKernel = Math.round(self.filterKernel / self.downsampleFactor);
       miniVolume = smoothen(smoothen(miniVolume, miniKernel), miniKernel);
       // Detect echoes
       var signals = detectEcho(miniVolume);
@@ -211,6 +211,11 @@ var Wavetape = function() {
       processor.disconnect();
       stream = null;
     }
+  };
+
+  self.getMaxRange = function() {
+    var measureRate = 1000 / self.measureTime;
+    return speedOfSound() / measureRate / 2;
   };
 };
 
