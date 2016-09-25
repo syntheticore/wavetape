@@ -6,7 +6,7 @@ var Wavetape = function() {
   if(!Wavetape.hasAudio) return;
 
   self.measureTime = 120;
-  self.pulseLength = 2;
+  self.pulseLength = 4;
   self.frequency = 10859;
 
   self.bufferLength = 512;
@@ -78,6 +78,7 @@ var Wavetape = function() {
     });
   };
 
+  // Return the actual number samples recorded for every pulse
   var getRecordLength = function() {
     return ctx.sampleRate * (self.measureTime / 1000) - self.bufferLength * 4;
   };
@@ -89,27 +90,32 @@ var Wavetape = function() {
     });
   };
 
-  // Smooth out the given buffer
+  // Return the average value of <kernel> samples around <i>
+  var smoothenSample = function(buffer, i, kernel) {
+    var sum = 0;
+    var count = 0;
+    for (var j = -kernel; j <= kernel; j++) {
+      var other = buffer[i + j];
+      if(!isNaN(other)) {
+        sum += other;
+        count++;
+      }
+    }
+    return count ? sum / count : 0;
+  };
+
+  // Smooth out the given <buffer> over <kernel>
   var smoothen = function(buffer, kernel) {
     return _.map(buffer, function(sample, i) {
-      var sum = 0;
-      var count = 0;
-      for (var j = -kernel; j <= kernel; j++) {
-        var other = buffer[i + j];
-        if(!isNaN(other)) {
-          sum += other;
-          count++;
-        }
-      }
-      return count ? sum / count : 0;
+      return smoothenSample(buffer, i, kernel);
     });
   };
 
   // Take every <n>th sample to create a lower resolution buffer
-  var downsample = function(buffer, n) {
+  var downsample = function(buffer, kernel, n) {
     var out = new Array(buffer.length / n);
-    for (var i = 0; i < out.length; i++) {
-      out[i] = buffer[i * n];
+    for(var i = 0; i < out.length; i++) {
+      out[i] = smoothenSample(buffer, i * n, kernel);
     }
     return out;
   };
@@ -167,18 +173,17 @@ var Wavetape = function() {
     interval = setInterval(pulse, self.measureTime);
     // Start listening
     listen(function(buffer) {
-      // Smoothen the buffer
-      var smooth = smoothen(buffer, self.filterKernel);
-      var miniVolume = downsample(smooth, self.downsampleFactor);
+      // Downsample and smoothen the buffer
+      buffer = downsample(buffer, self.filterKernel, self.downsampleFactor);
       var miniKernel = Math.round(self.filterKernel / self.downsampleFactor);
-      miniVolume = smoothen(smoothen(miniVolume, miniKernel), miniKernel);
+      buffer = smoothen(buffer, miniKernel);
       // Detect echoes
-      var signals = detectEcho(miniVolume);
+      var signals = detectEcho(buffer);
       if(!signals) return;
       // Calculate distance
       var distance = getDistance(signals.pulse, signals.echo);
       // Return used buffer for visualization
-      signals.signal = miniVolume;
+      signals.signal = buffer;
       cb(distance, signals);
     });
   };
