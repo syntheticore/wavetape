@@ -199,7 +199,7 @@ var Wavetape = function() {
     measure(function(dist, signals) {
       // Collect readings
       measurements.push(dist);
-      if(measurements.length > self.numMeasurements) {
+      while(measurements.length > self.numMeasurements) {
         measurements.shift();
       }
       // Return average measurement
@@ -226,9 +226,13 @@ var Wavetape = function() {
 
   // Return the maximum distance that can be measured in meters,
   // based on the current measuring rate and temperature
-  self.getMaxRange = function() {
-    var duration = getRecordLength() / ctx.sampleRate;
-    return speedOfSound() * duration / 2;
+  self.getRange = function() {
+    var minDuration = self.pulseLength / 1000 + self.filterKernel * 2 / ctx.sampleRate;
+    var maxDuration = getRecordLength() / ctx.sampleRate;
+    return {
+      min: speedOfSound() * minDuration / 2,
+      max: speedOfSound() * maxDuration / 2
+    };
   };
 };
 
