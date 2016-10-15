@@ -9,9 +9,9 @@ var Wavetape = function() {
   self.pulseLength = 4;
   self.frequency = 10859;
 
-  self.bufferLength = 512;
+  self.bufferLength = 256;
   self.filterKernel = 32;
-  self.downsampleFactor = 8;
+  self.downsampleFactor = 16;
   self.minAmplitude = 0.02;
   self.numMeasurements = 12;
 
